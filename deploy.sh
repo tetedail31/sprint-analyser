@@ -157,15 +157,15 @@ URL=$(field "['html_url']")
 # ------------------------------------------------------------- 5. attente du build
 echo "== 6. Attente de la publication"
 i=0
-while [ "$i" -lt 30 ]; do
+while [ "$i" -lt 50 ]; do
   code=$(api GET "/repos/$OWNER/$PROJECT/pages/builds/latest")
   st=$(field "['status']")
-  echo "   essai $((i+1))/30 : $st"
+  echo "   essai $((i+1))/50 : $st"
   [ "$st" = "built" ] && break
   [ "$st" = "errored" ] && die "le build Pages a échoué : $(field "['error']['message']")" 8
   i=$((i+1)); sleep 6
 done
-[ "$st" = "built" ] || echo "   (build encore en cours — l'URL peut répondre sous une minute)"
+[ "$st" = "built" ] || echo "   (build encore en cours après 5 min — l'URL répond peut-être sur une version antérieure)"
 
 # --------------------------------------------------------- 6. vérification HTTP
 echo "== 7. Vérification publique"
