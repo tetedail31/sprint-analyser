@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sprint Analyser — analyse vidéo de course</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#121a2e; --panel2:#0f1626; --line:#24304a;
+    --txt:#e8edf7; --dim:#8f9bb3; --accent:#5ee0b0; --warn:#f0b429; --bad:#ef6a6a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:baseline;flex-wrap:wrap}
+  h1{font-size:18px;margin:0;letter-spacing:.02em}
+  header span{color:var(--dim);font-size:13px}
+  main{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:18px;padding:18px;align-items:start}
+  @media(max-width:1050px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .stage{position:relative;background:#05070d;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+  canvas{display:block;width:100%;height:auto;cursor:grab;touch-action:none}
+  canvas.dragging{cursor:grabbing}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
+  .row label{color:var(--dim);font-size:13px;min-width:96px}
+  input[type=range]{flex:1;min-width:120px;accent-color:var(--accent)}
+  button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:9px 14px;font-size:14px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);color:#06231a;border-color:var(--accent);font-weight:600}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input[type=file]{color:var(--dim);font-size:13px}
+  .hint{color:var(--dim);font-size:12.5px;margin:6px 0 0}
+  .chk{display:flex;gap:8px;align-items:center;color:var(--dim);font-size:13px}
+  h2{font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:18px 0 8px}
+  .metric{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px dashed var(--line);font-size:14px}
+  .metric b{font-variant-numeric:tabular-nums}
+  .ok{color:var(--accent)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  ul{margin:6px 0 0;padding-left:18px} li{margin:5px 0}
+  pre{white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px;font-size:13px;max-height:420px;overflow:auto}
+  .badge{display:inline-block;font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+  .warnbox{border-left:3px solid var(--warn);padding:8px 12px;background:#1a1608;border-radius:6px;color:#f5e3b0;font-size:13px;margin-top:10px}
+  .err{border-left:3px solid var(--bad);background:#1e0f0f;color:#f6c9c9}
+</style>
+</head>
+<body>
+<header>
+  <h1>Sprint Analyser</h1>
+  <span>Analyse de technique de course — 100 % local, aucune vidéo n'est envoyée</span>
+</header>
+
+<main>
+  <section class="card">
+    <div class="row">
+      <input type="file" id="file" accept="video/*">
+      <span class="badge" id="fpsbadge">—</span>
+    </div>
+
+    <div class="stage">
+      <video id="v" playsinline muted style="display:none"></video>
+      <canvas id="c" width="960" height="540"></canvas>
+    </div>
+
+    <div class="row">
+      <label>Début</label><input type="range" id="t0" min="0" max="100" value="0" step="1">
+      <span id="t0v" class="badge">0.00 s</span>
+    </div>
+    <div class="row">
+      <label>Fin</label><input type="range" id="t1" min="0" max="100" value="100" step="1">
+      <span id="t1v" class="badge">0.00 s</span>
+    </div>
+
+    <div class="row">
+      <label>Zoom</label><input type="range" id="zoom" min="1" max="8" step="0.1" value="1">
+      <span id="zoomv" class="badge">1.0×</span>
+      <label class="chk"><input type="checkbox" id="follow"> Suivre le coureur</label>
+      <label class="chk"><input type="checkbox" id="showbox" checked> Cadre</label>
+      <label class="chk"><input type="checkbox" id="showangles" checked> Angles</label>
+    </div>
+
+    <div class="row">
+      <button id="play">Lire</button>
+      <button id="trim">Lire la sélection</button>
+      <button id="analyse" class="primary">Analyser</button>
+      <button id="reset">Réinitialiser la vue</button>
+    </div>
+    <p class="hint">Molette pour zoomer, glisser pour déplacer. Film de préférence strictement de profil, en ralenti (120 ou 240 ips) si ta caméra le permet — à 30 ips les contacts au sol sont trop courts pour être fiables.</p>
+    <div id="status" class="hint">Charge une vidéo pour commencer.</div>
+  </section>
+
+  <aside class="card">
+    <div id="results">
+      <h2>Résultats</h2>
+      <p class="hint">Aucune analyse pour l'instant.</p>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button id="export" disabled>Exporter le rapport</button>
+    </div>
+  </aside>
+</main>
+
+<script type="module">
+import { FilesetResolver, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const CDN = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const MODEL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+
+const video = document.getElementById("v");
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const resultsEl = document.getElementById("results");
+const fpsBadge = document.getElementById("fpsbadge");
+
+const el = id => document.getElementById(id);
+const zoomEl = el("zoom"), followEl = el("follow"), boxEl = el("showbox"), angEl = el("showangles");
+const t0El = el("t0"), t1El = el("t1");
+
+let landmarker = null;
+let frames = [];          // {t, lm}
+let lastReport = null;
+let rafId = null;
+let view = { scale: 1, x: 0, y: 0 };
+let dragging = false, dragStart = null;
+let lastTs = -1;
+let analyzeMode = false, analyzeEnd = 0;
+
+/* ---------- géométrie ---------- */
+function angleDeg(a, b, c){
+  const ab = Math.atan2(a.y - b.y, a.x - b.x);
+  const cb = Math.atan2(c.y - b.y, c.x - b.x);
+  let d = (ab - cb) * 180 / Math.PI;
+  d = Math.abs(d);
+  if (d > 180) d = 360 - d;
+  return d;
+}
+const mid = (p, q) => ({ x:(p.x+q.x)/2, y:(p.y+q.y)/2 });
+function verticalAngleDeg(top, bottom){
+  // angle de la ligne (bottom->top) par rapport à la verticale, en degrés, signé vers l'avant (+x)
+  const dx = top.x - bottom.x, dy = top.y - bottom.y;
+  return Math.atan2(dx, -dy) * 180 / Math.PI;
+}
+
+/* ---------- rendu ---------- */
+function fitView(){
+  const vw = video.videoWidth || 960, vh = video.videoHeight || 540;
+  canvas.width = vw; canvas.height = vh;
+  view = { scale: 1, x: 0, y: 0 };
+  draw();
+}
+
+function draw(){
+  const vw = canvas.width, vh = canvas.height;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle = "#05070d";
+  ctx.fillRect(0,0,vw,vh);
+  if (video.readyState >= 2){
+    ctx.save();
+    ctx.translate(view.x, view.y);
+    ctx.scale(view.scale, view.scale);
+    ctx.drawImage(video, 0, 0, vw, vh);
+    ctx.restore();
+  }
+  const f = currentFrame();
+  if (f && f.lm) drawOverlay(f.lm, vw, vh);
+}
+
+function currentFrame(){
+  if (!frames.length) return null;
+  const t = video.currentTime;
+  let best = null, bd = 1e9;
+  for (const f of frames){
+    const d = Math.abs(f.t - t);
+    if (d < bd){ bd = d; best = f; }
+  }
+  return bd < 0.25 ? best : null;
+}
+
+const SKELETON = [[11,12],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],
+                  [11,13],[13,15],[12,14],[14,16],[27,29],[28,30],[27,31],[28,32]];
+
+function drawOverlay(lm, vw, vh){
+  const P = i => ({ x: lm[i].x*vw, y: lm[i].y*vh });
+  ctx.save();
+  ctx.translate(view.x, view.y); ctx.scale(view.scale, view.scale);
+  ctx.lineWidth = Math.max(2, vw/400);
+  ctx.strokeStyle = "#5ee0b0"; ctx.globalAlpha = .9;
+  for (const [a,b] of SKELETON){
+    if (!lm[a] || !lm[b]) continue;
+    const p = P(a), q = P(b);
+    ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+  }
+  ctx.fillStyle = "#ffffff"; ctx.globalAlpha = 1;
+  for (const i of [11,12,13,14,15,16,23,24,25,26,27,28]){
+    if (!lm[i]) continue;
+    const p = P(i);
+    ctx.beginPath(); ctx.arc(p.x,p.y, Math.max(3, vw/300), 0, 7); ctx.fill();
+  }
+  if (boxEl.checked){
+    let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    for (const p of lm){ if(!p) continue; x0=Math.min(x0,p.x*vw); y0=Math.min(y0,p.y*vh); x1=Math.max(x1,p.x*vw); y1=Math.max(y1,p.y*vh); }
+    ctx.strokeStyle = "#f0b429"; ctx.setLineDash([8,6]); ctx.lineWidth = 2;
+    ctx.strokeRect(x0-10, y0-10, (x1-x0)+20, (y1-y0)+20);
+    ctx.setLineDash([]);
+  }
+  if (angEl.checked){
+    ctx.font = `${Math.max(13, vw/60)}px ui-monospace, monospace`;
+    ctx.fillStyle = "#5ee0b0";
+    const hip = mid(P(23),P(24)), sh = mid(P(11),P(12));
+    const kneeL = angleDeg(P(23),P(25),P(27)), kneeR = angleDeg(P(24),P(26),P(28));
+    const elbowL = angleDeg(P(11),P(13),P(15));
+    const lean = verticalAngleDeg(sh, hip);
+    ctx.fillText(`genou G ${kneeL.toFixed(0)}°  D ${kneeR.toFixed(0)}°`, 16, 30);
+    ctx.fillText(`coude ${elbowL.toFixed(0)}°   tronc ${lean.toFixed(0)}°`, 16, 30 + Math.max(18, vw/50));
+  }
+  ctx.restore();
+}
+
+/* ---------- zoom / pan ---------- */
+function applyZoom(px, py, factor){
+  const ns = Math.min(8, Math.max(1, view.scale * factor));
+  if (ns === view.scale) return;
+  // garder le point sous le curseur fixe
+  const k = ns / view.scale;
+  view.x = px - (px - view.x) * k;
+  view.y = py - (py - view.y) * k;
+  view.scale = ns;
+  if (view.scale === 1){ view.x = 0; view.y = 0; }
+  clampView();
+  zoomEl.value = view.scale.toFixed(1);
+  el("zoomv").textContent = view.scale.toFixed(1) + "×";
+  draw();
+}
+function clampView(){
+  const vw = canvas.width, vh = canvas.height;
+  const maxX = 0, maxY = 0;
+  const minX = vw - vw*view.scale, minY = vh - vh*view.scale;
+  view.x = Math.min(maxX, Math.max(minX, view.x));
+  view.y = Math.min(maxY, Math.max(minY, view.y));
+}
+function centerOn(lm){
+  if (!lm || !followEl.checked) return;
+  const hip = mid(lm[23], lm[24]);
+  const vw = canvas.width, vh = canvas.height;
+  view.x = vw/2 - hip.x*vw*view.scale;
+  view.y = vh/2 - hip.y*vh*view.scale;
+  clampView();
+}
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = canvas.getBoundingClientRect();
+  const px = (e.clientX - r.left) * (canvas.width / r.width);
+  const py = (e.clientY - r.top) * (canvas.height / r.height);
+  applyZoom(px, py, e.deltaY < 0 ? 1.12 : 1/1.12);
+}, { passive:false });
+canvas.addEventListener("pointerdown", e => { dragging = true; dragStart = { x:e.clientX, y:e.clientY, vx:view.x, vy:view.y }; canvas.classList.add("dragging"); canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  const r = canvas.getBoundingClientRect();
+  const s = canvas.width / r.width;
+  view.x = dragStart.vx + (e.clientX - dragStart.x) * s;
+  view.y = dragStart.vy + (e.clientY - dragStart.y) * s;
+  clampView(); draw();
+});
+canvas.addEventListener("pointerup", e => { dragging = false; canvas.classList.remove("dragging"); });
+
+zoomEl.addEventListener("input", () => {
+  const target = parseFloat(zoomEl.value);
+  applyZoom(canvas.width/2, canvas.height/2, target / view.scale);
+  el("zoomv").textContent = target.toFixed(1) + "×";
+});
+followEl.addEventListener("change", () => { if (followEl.checked && zoomEl.value < 1.8){ zoomEl.value = 2.4; applyZoom(canvas.width/2, canvas.height/2, 2.4/view.scale); el("zoomv").textContent = "2.4×"; } });
+
+/* ---------- chargement vidéo ---------- */
+el("file").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  video.src = URL.createObjectURL(f);
+  await new Promise(r => video.onloadedmetadata = r);
+  video.currentTime = 0;
+  await new Promise(r => video.onseeked = r);
+  fitView();
+  const d = video.duration || 0;
+  t0El.max = t1El.max = Math.max(1, Math.floor(d*100));
+  t0El.value = 0; t1El.value = Math.floor(d*100);
+  el("t0v").textContent = "0.00 s"; el("t1v").textContent = d.toFixed(2) + " s";
+  frames = []; lastTs = -1; lastReport = null;
+  el("export").disabled = true;
+  resultsEl.innerHTML = `<h2>Résultats</h2><p class="hint">Vidéo chargée (${d.toFixed(1)} s). Clique sur « Analyser ».</p>`;
+  statusEl.textContent = "Vidéo prête. L'analyse parcourt la sélection image par image.";
+  draw();
+  estimateFps(f).then(fps => {
+    if (fps){ fpsBadge.textContent = Math.round(fps) + " ips"; fpsBadge.className = "badge " + (fps >= 100 ? "ok" : "warn"); }
+    else fpsBadge.textContent = "ips inconnu";
+  });
+});
+
+async function estimateFps(){
+  // mesure grossière : compter les frames sur 1 s de lecture silencieuse
+  return new Promise(resolve => {
+    let n = 0; const t0 = video.currentTime;
+    const tick = () => { n++; if (video.currentTime - t0 < 0.6 && !video.paused) requestAnimationFrame(tick); else resolve(n / 0.6); };
+    video.currentTime = 0; video.play().then(() => requestAnimationFrame(tick)).catch(() => resolve(null));
+  });
+}
+
+t0El.addEventListener("input", () => { el("t0v").textContent = (t0El.value/100).toFixed(2)+" s"; });
+t1El.addEventListener("input", () => { el("t1v").textContent = (t1El.value/100).toFixed(2)+" s"; });
+
+el("play").addEventListener("click", () => {
+  if (video.paused){ video.play(); el("play").textContent = "Pause"; loopRender(); }
+  else { video.pause(); el("play").textContent = "Lire"; }
+});
+el("trim").addEventListener("click", async () => {
+  video.currentTime = t0El.value/100;
+  await new Promise(r => video.onseeked = r);
+  video.play(); el("play").textContent = "Pause"; loopRender();
+  const stop = () => { if (video.currentTime >= t1El.value/100){ video.pause(); video.removeEventListener("timeupdate", stop); el("play").textContent = "Lire"; } };
+  video.addEventListener("timeupdate", stop);
+});
+el("reset").addEventListener("click", () => { zoomEl.value = 1; el("zoomv").textContent = "1.0×"; view = { scale:1, x:0, y:0 }; draw(); });
+
+let loopOn = false;
+function loopRender(){
+  if (loopOn) return;
+  loopOn = true;
+  const step = () => {
+    draw();
+    const f = currentFrame();
+    if (f) centerOn(f.lm);
+    if (!video.paused) rafId = requestAnimationFrame(step);
+    else { loopOn = false; cancelAnimationFrame(rafId); }
+  };
+  rafId = requestAnimationFrame(step);
+}
+
+/* ---------- MediaPipe ---------- */
+async function initLandmarker(){
+  if (landmarker) return landmarker;
+  statusEl.textContent = "Chargement du modèle de pose…";
+  const vision = await FilesetResolver.forVisionTasks(`${CDN}/wasm`);
+  landmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: MODEL, delegate: "GPU" },
+    runningMode: "VIDEO",
+    numPoses: 1,
+    minPoseDetectionConfidence: 0.5,
+    minPosePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  return landmarker;
+}
+
+el("analyse").addEventListener("click", async () => {
+  if (!video.src){ statusEl.textContent = "Charge d'abord une vidéo."; return; }
+  const btn = el("analyse"); btn.disabled = true;
+  try {
+    await initLandmarker();
+  } catch (err){
+    statusEl.innerHTML = `<span class="err">Modèle inaccessible : ${err.message}. Vérifie la connexion (le modèle est téléchargé depuis Google).</span>`;
+    btn.disabled = false; return;
+  }
+  frames = []; lastTs = -1;
+  const a = t0El.value/100, b = t1El.value/100;
+  video.pause(); video.currentTime = a;
+  await new Promise(r => video.onseeked = r);
+  analyzeMode = true; analyzeEnd = b;
+  statusEl.textContent = "Analyse en cours… lecture de la sélection.";
+
+  await new Promise(resolve => {
+    let done = false;
+    const onFrame = () => {
+      if (done) return;
+      const t = video.currentTime;
+      if (t > analyzeEnd || video.ended){ done = true; video.pause(); resolve(); return; }
+      const ts = Math.round(t * 1000);
+      if (ts > lastTs){
+        try {
+          const res = landmarker.detectForVideo(video, ts);
+          const lm = res.landmarks && res.landmarks[0];
+          if (lm) frames.push({ t, lm });
+          lastTs = ts;
+        } catch(e){ /* frame ignorée */ }
+      }
+      if ("requestVideoFrameCallback" in video) video.requestVideoFrameCallback(onFrame);
+      else requestAnimationFrame(onFrame);
+    };
+    video.play().then(() => {
+      if ("requestVideoFrameCallback" in video) video.requestVideoFrameCallback(onFrame);
+      else requestAnimationFrame(onFrame);
+    }).catch(err => {
+      done = true;
+      statusEl.textContent = "Lecture refusée par le navigateur : " + err.message + ". Relance l'analyse après avoir cliqué une fois sur la vidéo.";
+      resolve();
+    });
+  });
+
+  analyzeMode = false;
+  btn.disabled = false;
+  if (!frames.length){ statusEl.textContent = "Aucune pose détectée. Cadre le coureur en entier, de profil, et vérifie l'éclairage."; return; }
+  const rep = buildReport(frames, video.duration);
+  lastReport = rep;
+  renderReport(rep);
+  el("export").disabled = false;
+  statusEl.textContent = `Analyse terminée : ${frames.length} images avec pose détectée.`;
+});
+
+/* ---------- métriques ---------- */
+function metricsForFrame(lm){
+  const L = { hip:lm[23], knee:lm[25], ank:lm[27], sh:lm[11], elb:lm[13], wr:lm[15] };
+  const R = { hip:lm[24], knee:lm[26], ank:lm[28], sh:lm[12], elb:lm[14], wr:lm[16] };
+  const tronc = verticalAngleDeg(mid(lm[11],lm[12]), mid(lm[23],lm[24]));
+  const out = { tronc };
+  for (const [k, s] of [["L",L],["R",R]]){
+    out["knee_"+k] = angleDeg(s.hip, s.knee, s.ank);
+    out["hip_"+k]  = angleDeg(s.sh, s.hip, s.knee);
+    out["elbow_"+k]= angleDeg(s.sh, s.elb, s.wr);
+    out["anky_"+k] = s.ank.y;
+  }
+  out.elbowMean = (out.elbow_L + out.elbow_R)/2;
+  return out;
+}
+
+function findContacts(series, times){
+  // maxima locaux de y (pied le plus bas) avec proéminence
+  const idx = [];
+  for (let i = 2; i < series.length-2; i++){
+    const y = series[i];
+    const neigh = [series[i-2],series[i-1],series[i+1],series[i+2]];
+    if (y >= Math.max(...neigh)) idx.push(i);
+  }
+  // fusion des maxima trop proches (< 120 ms)
+  const kept = [];
+  for (const i of idx){
+    if (!kept.length || times[i] - times[kept[kept.length-1]] > 0.12) kept.push(i);
+  }
+  return kept;
+}
+
+function median(a){ if(!a.length) return null; const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+function mean(a){ return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null; }
+
+function buildReport(frames, duration){
+  const times = frames.map(f => f.t);
+  const M = frames.map(f => metricsForFrame(f.lm));
+  const ankL = M.map(m => m.anky_L), ankR = M.map(m => m.anky_R);
+
+  const cL = findContacts(ankL, times), cR = findContacts(ankR, times);
+  const steps = [...cL.map(i=>({t:times[i], leg:"G", i})), ...cR.map(i=>({t:times[i], leg:"D", i}))].sort((a,b)=>a.t-b.t);
+  const intervals = [];
+  for (let i=1;i<steps.length;i++) intervals.push(steps[i].t - steps[i-1].t);
+  const stepTime = median(intervals);
+  const cadence = stepTime ? 60/stepTime : null;
+
+  const kneeAtContact = { L:[], R:[] }, hipAtContact = { L:[], R:[] };
+  for (const s of steps){
+    const m = M[s.i];
+    const leg = s.leg === "G" ? "L" : "R";   // findContacts raisonne en G/D, metricsForFrame en L/R
+    kneeAtContact[leg].push(m["knee_"+leg]);
+    hipAtContact[leg].push(m["hip_"+leg]);
+  }
+
+  const kneeG = median(kneeAtContact.L), kneeD = median(kneeAtContact.R);
+  const hipG = median(hipAtContact.L), hipD = median(hipAtContact.R);
+  const asym = (kneeG!=null && kneeD!=null) ? Math.abs(kneeG-kneeD)/Math.max(kneeG,kneeD)*100 : null;
+  const troncM = mean(M.map(m=>m.tronc));
+  const elbowM = mean(M.map(m=>m.elbowMean));
+
+  // densité d'images utile
+  const detectedFps = frames.length / Math.max(0.5, (times[times.length-1]-times[0]));
+
+  return {
+    nFrames: frames.length, duration,
+    cadence, stepTime, detectedFps,
+    kneeG, kneeD, hipG, hipD, asym, tronc: troncM, elbow: elbowM,
+    nSteps: steps.length,
+    times
+  };
+}
+
+/* ---------- interprétation ---------- */
+function interpret(r){
+  const axes = [];
+  const add = (sev, titre, detail, action) => axes.push({sev, titre, detail, action});
+
+  if (r.detectedFps && r.detectedFps < 60)
+    add("info", "Fréquence d'image faible",
+      `Seulement ${r.detectedFps.toFixed(0)} images exploitées par seconde. À ce niveau, les angles restent indicatifs et les temps de contact ne sont pas mesurables.`,
+      "Refilme en ralenti 120 ou 240 ips, cadré de profil, coureur entier dans le champ.");
+
+  if (r.cadence != null && r.cadence < 165)
+    add("warn", "Cadence basse",
+      `Cadence estimée à ${r.cadence.toFixed(0)} pas/min. Sous 165, la foulée est souvent trop longue : le pied se pose loin devant, ce qui freine à chaque appui.`,
+      "Ajouter 5 % de cadence sans changer l'allure : métronome ou repères sonores, séries courtes de 60 m.");
+  else if (r.cadence != null && r.cadence > 210)
+    add("warn", "Cadence très élevée",
+      `Cadence estimée à ${r.cadence.toFixed(0)} pas/min. Peut indiquer des pas trop courts ou une mesure bruitée sur une vidéo courte.`,
+      "Vérifier sur une séquence plus longue, filmée à 120 ips, avant de conclure.");
+
+  if (r.kneeG != null && r.kneeD != null){
+    // angle hanche-genou-cheville : 180° = jambe tendue, 140° = genou fléchi
+    const kmax = Math.max(r.kneeG, r.kneeD);
+    const kmin = Math.min(r.kneeG, r.kneeD);
+    if (kmax > 168)
+      add("bad", "Jambe trop tendue à l'attaque du sol",
+        `Genou à ${kmax.toFixed(0)}° au contact (180° = jambe parfaitement rectiligne). Le pied se pose loin devant le bassin : frein mécanique à chaque appui et charge sur le tibia.`,
+        "Rapprocher les appuis sous le bassin : gammes basses, skipping, séries de 40 m en accentuant la fréquence.");
+    if (kmin < 135)
+      add("info", "Genou très fléchi au contact",
+        `Genou à ${kmin.toFixed(0)}° au contact : appui très amorti. Économe en charge, mais perte de restitution possible.`,
+        "Conserver, en vérifiant que la cheville reste rigide au contact (talon-fesse et extension de cheville).");
+  }
+
+  if (Math.min(r.hipG ?? 999, r.hipD ?? 999) < 135 && (r.hipG != null || r.hipD != null))
+    add("info", "Hanche très fléchie au contact",
+      `Angle hanche-genou le plus fermé : ${Math.min(r.hipG ?? 999, r.hipD ?? 999).toFixed(0)}°. Une cuisse très relevée à l'appui suggère une attaque du sol haute, souvent associée à une foulée trop longue.`,
+      "Vérifier l'attaque de sol de profil à 120 ips ; gammes d'appuis rapprochés et travail d'extension de hanche en fin de poussée.");
+
+  if (r.asym != null && r.asym > 10)
+    add("warn", "Asymétrie entre les jambes",
+      `Écart de ${r.asym.toFixed(0)} % sur l'angle de genou au contact entre jambe gauche et droite. Au-delà de 10 %, on parle d'asymétrie notable : elle coûte de la vitesse et expose au déséquilibre.`,
+      "Travail unilatéral strict (fentes, step-up, RDL une jambe) et vérification vidéo de l'âge de la blessure éventuelle.");
+
+  if (r.tronc != null && Math.abs(r.tronc) > 14)
+    add("warn", "Inclinaison du tronc excessive",
+      `Tronc à ${Math.abs(r.tronc).toFixed(0)}° de la verticale. En phase de vitesse maximale, un tronc trop penché en avant empêche l'ouverture de hanche et raccourcit la poussée.`,
+      "Gainage bras au-dessus de la tête, puis séries en position « grand » : c'est l'inverse du départ. Travail du buste en course lancée.");
+
+  if (r.elbow != null && (r.elbow < 70 || r.elbow > 110))
+    add("info", "Bras hors de la plage 70–110°",
+      `Coude à ${r.elbow.toFixed(0)}° en moyenne. En sprint, l'angle se ferme vers 90° et s'ouvre en arrière : un bras trop ouvert ou trop fermé désorganise le contre-balancement.`,
+      "Gammes bras : pendulaire bras fléchi, séries de 30 m en accentuant l'amplitude arrière, sans croiser la ligne médiane.");
+
+  if (!axes.length)
+    add("ok", "Aucun défaut majeur détecté sur cette séquence",
+      "Les indicateurs mesurés restent dans les plages attendues pour un sprinteur entraîné.",
+      "Continuer la préparation habituelle et refilmer dans trois semaines pour suivre l'évolution.");
+
+  return axes;
+}
+
+const PLAN = {
+  cadence:[
+    "Lundi — Cadence : 2 séries de 6 × 60 m à cadence majorée de 5 % (métronome ou repères au sol), récupération 90 s entre les 60 m, 4 min entre les séries.",
+    "Mercredi — Gammes : skipping bas, talons-fesses, montées de genoux, 3 × 20 m de chaque + 4 × 40 m course relâchée.",
+    "Vendredi — Vrai sprint : 3 × 80 m à 95 %, récupération complète (5 min), en pensant « pieds sous le bassin »."
+  ],
+  force:[
+    "Lundi — Force unilatérale : fentes marchées 4 × 8 par jambe, RDL une jambe 3 × 8, hip thrust 3 × 10, gainage 3 × 40 s.",
+    "Mercredi — Pliométrie : bondissements horizontaux 4 × 5, cloche-pied 3 × 6 par jambe, sur sol souple.",
+    "Vendredi — Rappel technique : 5 × 50 m en accentuant l'extension de hanche, filmé de profil pour contrôle."
+  ],
+  asym:[
+    "Lundi — Unilatéral strict : step-up 4 × 8 par jambe, fente bulgare 3 × 8, mollets une jambe 3 × 15.",
+    "Mercredi — Stabilité : gainage latéral 3 × 30 s par côté, dead-bug 3 × 10, équilibre unipodal yeux fermés 3 × 30 s.",
+    "Vendredi — Course : 4 × 60 m en comptant les appuis, en cherchant l'égalité gauche/droite plutôt que la vitesse."
+  ],
+  gainage:[
+    "Lundi — Tronc : planche 4 × 40 s, planche latérale 3 × 30 s par côté, hollow hold 3 × 20 s.",
+    "Mercredi — Coordination : 4 × 30 m en position « grand » (buste haut, hanches ouvertes), filmé de profil.",
+    "Vendredi — Vitesse : 3 × 60 m lancé, en gardant le buste vertical à vitesse maximale."
+  ],
+  bras:[
+    "Lundi — Gammes bras : pendulaire 3 × 20 s, bras fléchi à 90°, amplitude arrière marquée, sans croiser.",
+    "Mercredi — Coordination : 4 × 40 m avec consigne unique « coudes serrés, mains qui reviennent à la hanche ».",
+    "Vendredi — Vitesse : 3 × 60 m à 95 %, relâchement des épaules."
+  ],
+  base:[
+    "Lundi — Technique : gammes complètes (skipping, talons-fesses, montées de genoux) 3 × 20 m, puis 4 × 60 m progressifs.",
+    "Mercredi — Force générale : squat 3 × 8, soulevé de terre 3 × 6, gainage 3 × 40 s.",
+    "Vendredi — Vitesse : 4 × 80 m à 90 %, récupération complète, filmé de profil pour comparaison dans trois semaines."
+  ]
+};
+
+function buildPlan(axes){
+  const keys = new Set();
+  for (const a of axes){
+    const t = a.titre.toLowerCase();
+    if (t.includes("cadence")) keys.add("cadence");
+    if (t.includes("hanche")) keys.add("force");
+    if (t.includes("asymétrie")) keys.add("asym");
+    if (t.includes("tronc")) keys.add("gainage");
+    if (t.includes("bras") || t.includes("coude")) keys.add("bras");
+    if (t.includes("attaque")) keys.add("cadence");
+  }
+  if (!keys.size) keys.add("base");
+  let out = "PLAN D'ENTRAÎNEMENT — 3 SEMAINES\n\n";
+  out += "Structure : 3 séances par semaine, 48 h entre deux séances de qualité. Semaine 1 volume indiqué, semaine 2 identique avec +1 répétition par série, semaine 3 allégée (deux tiers du volume) pour assimiler.\n\n";
+  for (const k of keys){
+    out += `— Axe : ${k === "asym" ? "asymétrie" : k === "gainage" ? "tronc et posture" : k}\n`;
+    for (const l of PLAN[k]) out += "  • " + l + "\n";
+    out += "\n";
+  }
+  out += "Règles : jamais deux séances de vitesse maximale d'affilée ; toute douleur qui persiste plus de 48 h impose l'arrêt et un avis médical ; dormir 7 à 9 h, c'est le premier facteur de progression.\n";
+  out += "\nÀ valider avec un entraîneur : ce plan est généré à partir de mesures vidéo en 2D, il ne remplace ni un diagnostic ni un programme individualisé.\n";
+  return out;
+}
+
+/* ---------- rendu des résultats ---------- */
+function fmt(v, unit="", dec=0){ return v == null ? "—" : v.toFixed(dec) + unit; }
+
+function renderReport(r){
+  const axes = interpret(r);
+  const plan = buildPlan(axes);
+  const cls = s => s === "bad" ? "bad" : s === "warn" ? "warn" : s === "ok" ? "ok" : "";
+  let html = `<h2>Mesures</h2>
+    <div class="metric"><span>Images analysées</span><b>${r.nFrames}</b></div>
+    <div class="metric"><span>Images/s exploitées</span><b class="${r.detectedFps < 60 ? "warn" : "ok"}">${fmt(r.detectedFps,"",0)}</b></div>
+    <div class="metric"><span>Pas détectés</span><b>${r.nSteps}</b></div>
+    <div class="metric"><span>Cadence</span><b>${fmt(r.cadence," pas/min")}</b></div>
+    <div class="metric"><span>Temps de pas</span><b>${r.stepTime ? (r.stepTime*1000).toFixed(0)+" ms" : "—"}</b></div>
+    <div class="metric"><span>Genou au contact — gauche</span><b>${fmt(r.kneeG,"°")}</b></div>
+    <div class="metric"><span>Genou au contact — droite</span><b>${fmt(r.kneeD,"°")}</b></div>
+    <div class="metric"><span>Asymétrie genou</span><b class="${r.asym > 10 ? "warn" : ""}">${fmt(r.asym," %")}</b></div>
+    <div class="metric"><span>Hanches au contact (G/D)</span><b>${fmt(r.hipG,"°")} / ${fmt(r.hipD,"°")}</b></div>
+    <div class="metric"><span>Tronc / verticale</span><b>${fmt(r.tronc,"°")}</b></div>
+    <div class="metric"><span>Angle du coude</span><b>${fmt(r.elbow,"°")}</b></div>
+    <h2>Axes d'amélioration</h2><ul>`;
+  for (const a of axes) html += `<li><b class="${cls(a.sev)}">${a.titre}</b><br><span style="color:var(--dim)">${a.detail}</span><br>→ ${a.action}</li>`;
+  html += `</ul><h2>Plan d'entraînement</h2><pre id="planbox">${plan.replace(/</g,"&lt;")}</pre>`;
+  html += `<div class="warnbox">Limites assumées : mesures 2D sur vidéo monoculaire, sans calibration métrique ni capteur de force. Les angles sont fiables à 5–10° près, la cadence dépend de la fréquence d'image, et les temps de contact au sol ne sont pas mesurables de façon exploitable. Ce rapport est un outil pédagogique, pas un diagnostic médical ni un avis d'entraîneur.</div>`;
+  resultsEl.innerHTML = html;
+  lastReport = { ...r, axes, plan };
+}
+
+el("export").addEventListener("click", () => {
+  if (!lastReport) return;
+  const r = lastReport;
+  let md = `# Rapport — Sprint Analyser\n\n`;
+  md += `Cadence : ${fmt(r.cadence)} pas/min · Genou contact G/D : ${fmt(r.kneeG)}° / ${fmt(r.kneeD)}° · Asymétrie : ${fmt(r.asym)} %\n`;
+  md += `Tronc : ${fmt(r.tronc)}° · Coude : ${fmt(r.elbow)}° · Images analysées : ${r.nFrames}\n\n`;
+  md += `## Axes d'amélioration\n`;
+  for (const a of r.axes) md += `- **${a.titre}** — ${a.detail}\n  - Action : ${a.action}\n`;
+  md += `\n## Plan\n\n\`\`\`\n${r.plan}\n\`\`\`\n`;
+  const blob = new Blob([md], { type: "text/markdown" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "rapport-sprint.md";
+  a.click();
+});
+
+/* ---------- divers ---------- */
+window.addEventListener("resize", () => draw());
+draw();
+</script>
+</body>
+</html>
