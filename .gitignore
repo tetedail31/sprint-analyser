@@ -1,3 +1,6 @@
+.cf_token
+.gh_token
+.pages-work/
+.api.json
+.live.html
 dist/
-*.har
-.env*
